@@ -1,4 +1,5 @@
 import Http1.Framing
+import Http1.Body
 
 /-!
 # Worked framing examples, checked by the kernel
@@ -80,5 +81,20 @@ example : readerCL (msg [hdr "Content-Length" "42"]) = readerTE (msg [hdr "Conte
 The CL reader sees a body of 6 bytes; the TE reader reads it as chunked. -/
 example : readerCL (msg [hdr "Content-Length" "6", hdr "Transfer-Encoding" "chunked"]) ≠
     readerTE (msg [hdr "Content-Length" "6", hdr "Transfer-Encoding" "chunked"]) := by decide +kernel
+
+/-! ## The byte boundary is exact (Body.lean, BodyProof.lean) -/
+
+/-- A 5-byte Content-Length body ("hello") followed by the next request's bytes ("GET") hands back exactly
+"GET": the boundary is after byte 5, determined. -/
+example : takeExact 5 (bytes "hello" ++ bytes "GET") = some (bytes "hello", bytes "GET") := by decide +kernel
+
+/-- A chunked body of one chunk "hi", then a continuation, reads back "hi" and hands back the continuation:
+where the chunked message ends is determined by the `0 CRLF CRLF` terminator. -/
+example : readChunked (writeChunked [bytes "hi"] ++ bytes "GET /") = some (bytes "hi", bytes "GET /") := by
+  decide +kernel
+
+/-- Two chunks concatenate; nothing of the continuation leaks into the body. -/
+example : readChunked (writeChunked [bytes "ab", bytes "cd"] ++ [0]) = some (bytes "abcd", [0]) := by
+  decide +kernel
 
 end Http1.Examples
