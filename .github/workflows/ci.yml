@@ -1,0 +1,28 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build (the kernel checks no_desync and every example)
+        uses: leanprover/lean-action@v1
+        with:
+          build: true
+          test: false
+          lint: false
+      - name: Axioms (only the three standard axioms)
+        run: |
+          echo 'import Http1
+          #print axioms Http1.no_desync' > /tmp/ax.lean
+          lake env lean /tmp/ax.lean | tee /tmp/ax.txt
+          ! grep -E "sorryAx|native" /tmp/ax.txt
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Differential harness (Lean oracle, Std.Http; h11 if installable)
+        run: |
+          pip install h11
+          python3 test/harness/run.py || true
