@@ -1,0 +1,116 @@
+# HTTP/1.1 framing, proved unambiguous — and where real parsers disagree
+
+Request smuggling happens when two parties on one connection — a proxy in front, a server behind it —
+disagree about where one HTTP message ends and the next begins. This project writes RFC 9112 §6.1's
+message-body-length rules down in Lean, **proves the property that rules smuggling out**, and then runs the
+same byte streams through real HTTP parsers to see which ones diverge from that proved reference.
+
+It needs no cryptography. The whole result is about parsing: a byte stream should have exactly one reading.
+
+## The theorem
+
+A desync is a disagreement between a reader that trusts `Content-Length` and a reader that trusts
+`Transfer-Encoding` — the two sides an attacker plays against each other. Both are modelled as functions to
+a framing verdict, and:
+
+> **`no_desync`** — on every message the conformant checker `frame` accepts, the Content-Length-trusting
+> reader and the Transfer-Encoding-trusting reader compute the *same* framing.
+
+So a conformant front-end and a conformant back-end cannot be desynchronised. The messages where the two
+readers *could* differ — both headers present, conflicting `Content-Length`, `chunked` not the final
+coding, chunked on HTTP/1.0 — are exactly the ones `frame` rejects, and the theorem holds because it rejects
+them. `no_desync` rests only on Lean's three standard axioms; [Tenet](https://github.com/keithadler/tenet),
+an independent kernel, re-checks all 146 declarations.
+
+`Http1/Examples.lean` runs the classic vectors through the kernel with `decide +kernel`: `CL` + `TE` →
+reject, conflicting `Content-Length` → reject, a clean chunked or single length → accept, and on a rejected
+vector the two readers provably *disagree* (which is why it is rejected).
+
+## What real parsers do with the same bytes
+
+`test/harness/run.py` runs a corpus of raw request byte streams (`test/corpus/vectors.py`) through every
+parser it can find and compares each to the proved spec. Full table:
+[test/harness/RESULTS.md](test/harness/RESULTS.md). The parsers:
+
+- **Lean (proved)** — the compiled `frame`, the function `no_desync` is about (the reference).
+- **h11 0.16** — the Python parser behind hypercorn and uvicorn's h11 mode.
+- **Node/llhttp** — Node's `http.Server`, whose parser is llhttp.
+- **Std.Http** — Lean's own standard-library HTTP/1.1 framing (`Message.Head.getSize`).
+
+Where they diverge from the proved reference (6 of 21 vectors):
+
+| Vector | proved spec | h11 | Node/llhttp | Std.Http |
+|---|---|---|---|---|
+| both `Content-Length` and `Transfer-Encoding` | reject | **chunked** | reject | reject |
+| the same, `Transfer-Encoding` first | reject | **chunked** | reject | reject |
+| tab after the colon on `Transfer-Encoding` (with `Content-Length`) | reject | **chunked** | reject | reject |
+| `Content-Length` ended by a bare LF, then `Transfer-Encoding` | reject | **chunked** | reject | reject |
+| all header lines ended by a bare LF | reject | **length:5** | reject | reject |
+| duplicate `Content-Length`, same value | length:5 | length:5 | **reject** | **reject** |
+
+Read defensively, not as exploits — a divergence is smuggling *material*, and whether any specific
+front-end/back-end pairing is exploitable depends on deployment. Two things stand out:
+
+- **h11 resolves `Content-Length` + `Transfer-Encoding` in favour of `Transfer-Encoding`, and tolerates
+  bare-LF line endings and tab-obfuscated headers**, where the proved spec, Node and Lean's `Std.Http` all
+  reject. h11 is a sans-IO library that follows RFC 7230's older "Transfer-Encoding overrides" rule and
+  leaves policy to the caller; but a CL-trusting proxy in front of an h11 back-end is exactly the CL.TE
+  desync `no_desync` describes. Its bare-LF tolerance is the classic line-ending smuggling primitive.
+- **Node and Lean's `Std.Http` reject duplicate `Content-Length` even when the values agree**, which the
+  proved spec (and RFC 9112 §6.3.5, which *permits* collapsing them) and h11 accept. This is the safe
+  direction — rejecting — and is noted for completeness.
+
+### Item: Lean's own standard library
+
+Lean 4's `Std.Http` ships a full HTTP/1.1 implementation. Its framing decision `Message.Head.getSize` agrees
+with the proved spec on every vector except duplicate-agreeing `Content-Length`, where it is *stricter*
+(rejects). That is a good result for the standard library: on this corpus it never frames a message a way
+the proved spec would call ambiguous.
+
+## Running it
+
+Build (needs [elan](https://github.com/leanprover/elan); toolchain pinned in `lean-toolchain`):
+
+```bash
+lake build
+```
+
+The proved spec as a CLI — reads a raw request on stdin, prints `reject` / `length:N` / `chunked`:
+
+```bash
+printf 'POST / HTTP/1.1\r\nContent-Length: 6\r\nTransfer-Encoding: chunked\r\n\r\n' | .lake/build/bin/http1 frame
+```
+
+The differential harness (uses whichever of Python+h11, Node, and the two Lean binaries are present):
+
+```bash
+python3 test/harness/run.py
+```
+
+## Layout
+
+| Path | What it is |
+|---|---|
+| `Http1/Framing.lean` | The framing model, `frame`, the two readers, and `no_desync` |
+| `Http1/Examples.lean` | The classic desync vectors, checked by the kernel |
+| `Http1/Parse.lean` | Raw request bytes → `Msg`, so `frame` runs on wire bytes |
+| `Main.lean` | `http1 frame`, the proved spec as a CLI |
+| `StdHttpDriver.lean` | `stdhttp`, a driver for Lean's own `Std.Http` framing |
+| `test/corpus/vectors.py` | The raw byte corpus |
+| `test/harness/` | The per-parser drivers and the runner |
+
+## Scope and honesty
+
+- The model covers the body-length rules of RFC 9112 §6.1 (the smuggling-critical decision). It does not
+  model the full grammar (obs-fold, chunk extensions, trailers), which a complete parser must also get
+  right.
+- The harness's shared header split is the harness's own; the `Std.Http` column tests that library's
+  framing decision and its `Content-Length` / `Transfer-Encoding` parsers, not its byte tokenizer.
+- A divergence from the proved spec is a conformance finding and a desync ingredient. It is **not** a claim
+  that any particular deployment is exploitable, and no exploits are developed here. The point is the
+  opposite: a proved, unambiguous reference to measure real parsers against, so divergences can be found
+  and fixed.
+
+## License
+
+MIT.
