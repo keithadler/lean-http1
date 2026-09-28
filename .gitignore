@@ -1,0 +1,5 @@
+.lake/
+out/
+__pycache__/
+*.pyc
+test/harness/servers/

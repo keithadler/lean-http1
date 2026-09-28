@@ -1,0 +1,9 @@
+name = "Http1"
+defaultTargets = ["Http1"]
+
+[[lean_lib]]
+name = "Http1"
+
+[[lean_exe]]
+name = "http1"
+root = "Main"
