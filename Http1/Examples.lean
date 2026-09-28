@@ -1,5 +1,6 @@
 import Http1.Framing
 import Http1.Body
+import Http1.Message
 
 /-!
 # Worked framing examples, checked by the kernel
@@ -96,5 +97,22 @@ example : readChunked (writeChunked [bytes "hi"] ++ bytes "GET /") = some (bytes
 /-- Two chunks concatenate; nothing of the continuation leaks into the body. -/
 example : readChunked (writeChunked [bytes "ab", bytes "cd"] ++ [0]) = some (bytes "abcd", [0]) := by
   decide +kernel
+
+/-! ## The whole message occupies a determined prefix (Message.lean) -/
+
+/-- A request line, one header, a 2-byte body "hi", then the next request's bytes: the reader returns the
+lines, "hi", and hands back the next request untouched. The header/body/next-request split is determined. -/
+example :
+    readHeadAndBody (Framing.length 2)
+      (serBlock [bytes "POST / HTTP/1.1", bytes "Host: a"] ++ (bytes "hi" ++ bytes "GET /x")) =
+      some ([bytes "POST / HTTP/1.1", bytes "Host: a"], bytes "hi", bytes "GET /x") := by
+  have h := message_boundary_length [bytes "POST / HTTP/1.1", bytes "Host: a"]
+    (by intro l hl; simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hl
+        rcases hl with h | h <;> subst h <;> decide +kernel)
+    (by intro l hl; simp only [List.mem_cons, List.mem_singleton, List.not_mem_nil, or_false] at hl
+        rcases hl with h | h <;> subst h <;> decide +kernel)
+    (bytes "hi") (bytes "GET /x")
+  have hlen : (bytes "hi").length = 2 := by decide +kernel
+  rw [hlen] at h; exact h
 
 end Http1.Examples

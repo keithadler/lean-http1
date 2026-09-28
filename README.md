@@ -38,9 +38,23 @@ message occupies a determined prefix of the connection:
 
 The chunked proof is the substantial one: it goes through the hex chunk-size round-trip
 (`readChunkSize_toHex`, itself resting on a base-16 inversion `toHexGo_inv`) and an induction over the chunk
-list. Together with `no_desync` this says: on an accepted message the framing is chosen unambiguously, and
-the chosen framing then splits the byte stream at one determined point. Tenet re-checks all 269
-declarations, 0 failed.
+list. And the header block itself has a determined boundary (`Http1/Header.lean`, `Http1/Message.lean`):
+
+> **`readBlock_serBlock`** — a header block of non-empty, CR-free lines, closed by a blank line and followed
+> by any continuation, reads back as exactly those lines, leaving exactly the continuation. A line is
+> terminated only by CRLF, so a header ended by a bare LF is not recognised — the reader rejects rather than
+> guessing a boundary, which is what keeps it in step with a CRLF-framing peer (this is the h11 bare-LF class
+> of divergence, ruled out).
+>
+> **`message_boundary_length`, `message_boundary_chunked`** — the capstone: a whole message (header block
+> then body, length-delimited or chunked) followed by any continuation reads back as exactly that message,
+> leaving exactly the continuation.
+
+So the chain is complete: on an accepted message the framing is chosen unambiguously (`no_desync`), the
+header/body split is at one determined offset (`readBlock_serBlock`), and the chosen framing ends the body at
+one determined point (`takeExact_append` / `readChunked_writeChunked`). A well-formed message occupies a
+determined prefix of the connection — there is no second place the next message could begin. Tenet re-checks
+all 339 declarations, 0 failed.
 
 `Http1/Examples.lean` runs the classic vectors through the kernel with `decide +kernel`: `CL` + `TE` →
 reject, conflicting `Content-Length` → reject, a clean chunked or single length → accept, and on a rejected
@@ -116,6 +130,8 @@ python3 test/harness/run.py
 | `Http1/Parse.lean` | Raw request bytes → `Msg`, so `frame` runs on wire bytes |
 | `Http1/Body.lean` | The length and chunked body readers; `takeExact_append` (length boundary exact) |
 | `Http1/BodyProof.lean` | `readChunked_writeChunked` — the chunked boundary is exact |
+| `Http1/Header.lean` | The line/block readers; `readBlock_serBlock` — the header boundary is unique |
+| `Http1/Message.lean` | `message_boundary_length` / `_chunked` — a whole message occupies a determined prefix |
 | `Main.lean` | `http1 frame`, the proved spec as a CLI |
 | `StdHttpDriver.lean` | `stdhttp`, a driver for Lean's own `Std.Http` framing |
 | `test/corpus/vectors.py` | The raw byte corpus |
@@ -123,10 +139,11 @@ python3 test/harness/run.py
 
 ## Scope and honesty
 
-- The model covers the body-length rules of RFC 9112 §6.1 and the two body readers (length-delimited and
-  chunked), with proofs that each fixes the message boundary exactly. It does not model the full grammar
-  (obs-fold, chunk extensions, trailers), which a complete parser must also get right; those are where a
-  stricter reader should reject rather than guess.
+- The model covers RFC 9112 §6.1's framing decision, the header-block boundary, and the two body readers
+  (length-delimited and chunked), with proofs that each fixes the boundary exactly — end to end, a message
+  occupies a determined prefix. It does not model the full field grammar (obs-fold, chunk extensions,
+  trailers); those are where a stricter reader should reject rather than guess, and the harness is what keeps
+  the spec honest about them.
 - The harness's shared header split is the harness's own; the `Std.Http` column tests that library's
   framing decision and its `Content-Length` / `Transfer-Encoding` parsers, not its byte tokenizer.
 - A divergence from the proved spec is a conformance finding and a desync ingredient. It is **not** a claim
