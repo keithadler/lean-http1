@@ -1,0 +1,21 @@
+worker_processes 1;
+daemon off;
+pid PREFIX/nginx.pid;
+error_log PREFIX/error.log crit;
+events { worker_connections 64; }
+http {
+  access_log off;
+  client_body_temp_path PREFIX/body;
+  proxy_temp_path PREFIX/proxy;
+  fastcgi_temp_path PREFIX/fastcgi;
+  uwsgi_temp_path PREFIX/uwsgi;
+  scgi_temp_path PREFIX/scgi;
+  server {
+    listen 127.0.0.1:9101;
+    location / {
+      proxy_pass http://127.0.0.1:9000;
+      proxy_http_version 1.1;
+      proxy_set_header Connection "";
+    }
+  }
+}

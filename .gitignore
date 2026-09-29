@@ -3,3 +3,6 @@ out/
 __pycache__/
 *.pyc
 test/harness/servers/
+
+test/smuggle/nginx-prefix/
+test/smuggle/*.log

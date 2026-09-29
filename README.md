@@ -107,6 +107,24 @@ with the proved spec on every vector except duplicate-agreeing `Content-Length`,
 (rejects). That is a good result for the standard library: on this corpus it never frames a message a way
 the proved spec would call ambiguous.
 
+## Proxy x backend boundary harness
+
+`test/smuggle/` runs the proved spec against real proxies and a real backend. It starts a Node/llhttp
+backend and puts nginx, HAProxy and Caddy in front of it (each reverse-proxying to the backend), sends
+ambiguous request streams — a main request plus a marker request — through each, and records what the
+backend actually parsed. Comparing the columns shows whether the components frame the same bytes differently
+(a desync) or agree. Needs nginx, haproxy, caddy on the PATH; everything runs on localhost.
+
+```bash
+python3 test/smuggle/run.py     # writes test/smuggle/RESULTS.md
+```
+
+On the current corpus the result is consistent, not a desync: Node and nginx reject every ambiguous payload,
+while HAProxy and Caddy both strip `Content-Length` and use chunked (they agree on the framing, verified from
+the raw bytes each forwards). No exploitable proxy-vs-proxy desync surfaced. The proved spec rejects all of
+them, which is the safe reading. The harness is the tool; finding a genuine desync would need the deeper
+`Transfer-Encoding`/`Content-Length` obfuscation families, the natural next extension.
+
 ## Running it
 
 Build (needs [elan](https://github.com/leanprover/elan); toolchain pinned in `lean-toolchain`):
