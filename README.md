@@ -46,15 +46,21 @@ list. And the header block itself has a determined boundary (`Http1/Header.lean`
 > guessing a boundary, which is what keeps it in step with a CRLF-framing peer (this is the h11 bare-LF class
 > of divergence, ruled out).
 >
-> **`message_boundary_length`, `message_boundary_chunked`** — the capstone: a whole message (header block
-> then body, length-delimited or chunked) followed by any continuation reads back as exactly that message,
-> leaving exactly the continuation.
+> **`parseField_serField`** — a header field splits at its first colon into a name and an OWS-trimmed value,
+> and that split is unique: a canonical field reads back exactly. So a space before the colon or a second
+> colon is pinned down, not guessed.
+>
+> **`message_boundary_length`, `message_boundary_chunked`** — a whole message (header block then body,
+> length-delimited or chunked) followed by any continuation reads back as exactly that message.
+>
+> **`full_message_boundary_length`** — the top: raw bytes → the request line, the parsed `(name, value)`
+> fields, the body, and the exact next-request bytes. The recovered fields are precisely the input to
+> `frame`, so the framing verdict — and `no_desync` — apply to exactly what was written.
 
 So the chain is complete: on an accepted message the framing is chosen unambiguously (`no_desync`), the
 header/body split is at one determined offset (`readBlock_serBlock`), and the chosen framing ends the body at
 one determined point (`takeExact_append` / `readChunked_writeChunked`). A well-formed message occupies a
-determined prefix of the connection — there is no second place the next message could begin. Tenet re-checks
-all 339 declarations, 0 failed.
+determined prefix of the connection — there is no second place the next message could begin. Tenet re-checks all 382 declarations, 0 failed.
 
 `Http1/Examples.lean` runs the classic vectors through the kernel with `decide +kernel`: `CL` + `TE` →
 reject, conflicting `Content-Length` → reject, a clean chunked or single length → accept, and on a rejected
@@ -131,7 +137,8 @@ python3 test/harness/run.py
 | `Http1/Body.lean` | The length and chunked body readers; `takeExact_append` (length boundary exact) |
 | `Http1/BodyProof.lean` | `readChunked_writeChunked` — the chunked boundary is exact |
 | `Http1/Header.lean` | The line/block readers; `readBlock_serBlock` — the header boundary is unique |
-| `Http1/Message.lean` | `message_boundary_length` / `_chunked` — a whole message occupies a determined prefix |
+| `Http1/Field.lean` | Field split at the first colon; `parseField_serField` — a field has one reading |
+| `Http1/Message.lean` | `message_boundary_*` and `full_message_boundary_length` — bytes → fields, one reading |
 | `Main.lean` | `http1 frame`, the proved spec as a CLI |
 | `StdHttpDriver.lean` | `stdhttp`, a driver for Lean's own `Std.Http` framing |
 | `test/corpus/vectors.py` | The raw byte corpus |

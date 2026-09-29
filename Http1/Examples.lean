@@ -115,4 +115,21 @@ example :
   have hlen : (bytes "hi").length = 2 := by decide +kernel
   rw [hlen] at h; exact h
 
+/-- The full capstone on concrete bytes: a request line, a `Host: a` header, a 2-byte body, then the next
+request. `parseFullMessage` recovers the request line, the field, the body, and the exact next-request bytes;
+the recovered field is the input `frame` decides on. -/
+example :
+    parseFullMessage (Framing.length 2)
+      (serBlock [bytes "POST / HTTP/1.1", serField ⟨bytes "Host", bytes "a"⟩] ++ (bytes "hi" ++ bytes "GET /x")) =
+      some (bytes "POST / HTTP/1.1", [⟨bytes "Host", bytes "a"⟩], bytes "hi", bytes "GET /x") := by
+  have h := full_message_boundary_length (bytes "POST / HTTP/1.1") [⟨bytes "Host", bytes "a"⟩]
+    (bytes "hi") (bytes "GET /x")
+    (by decide +kernel) (by decide +kernel)
+    (by intro g hg; simp only [List.mem_singleton] at hg; subst hg
+        exact ⟨by decide +kernel, by decide +kernel, by decide +kernel, by decide +kernel, by decide +kernel⟩)
+    (by intro g hg; simp only [List.mem_singleton] at hg; subst hg
+        exact ⟨by decide +kernel, by decide +kernel⟩)
+  have hlen : (bytes "hi").length = 2 := by decide +kernel
+  rw [hlen] at h; exact h
+
 end Http1.Examples
